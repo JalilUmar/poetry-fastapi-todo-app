@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from .schema import UpdateTodoSchema, TodoSchema
 from fastapi import Depends, status, Response, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import cast, String
+from sqlmodel import Session, select
+from typing import Annotated
+
 from .models import TodoModel
 from dependencies import get_db, get_current_user
 from uuid import uuid4
@@ -12,8 +13,12 @@ router = APIRouter(prefix="/api/todo")
 
 
 @router.get("/", status_code=status.HTTP_200_OK)
-async def get_all_todo(db: Session = Depends(get_db), user=Depends(get_current_user)):
-    todo_list = db.query(TodoModel).filter(TodoModel.userId == user).all()
+async def get_all_todo(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[str, Depends(get_current_user)],
+):
+    # todo_list = db.query(TodoModel).filter(TodoModel.userId == user).all()
+    todo_list = db.exec(select(TodoModel).where(TodoModel.userId == user)).all()
 
     return {
         "success": True,
@@ -24,10 +29,11 @@ async def get_all_todo(db: Session = Depends(get_db), user=Depends(get_current_u
 @router.get("/{id}", status_code=status.HTTP_200_OK)
 async def get_one_todo(
     id: str,
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[str, Depends(get_current_user)],
 ):
-    todo = db.query(TodoModel).filter(TodoModel.todoId == id).first()
+    # todo = db.query(TodoModel).filter(TodoModel.todoId == id).first()
+    todo = db.exec(select(TodoModel).where(TodoModel.todoId == id)).first()
 
     if not todo:
         raise HTTPException(
@@ -42,10 +48,13 @@ async def get_one_todo(
 
 @router.delete("/{id}", status_code=status.HTTP_200_OK)
 async def delete_todo(
-    id: str, db: Session = Depends(get_db), user=Depends(get_current_user)
+    id: str,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[str, Depends(get_current_user)],
 ):
-    db.query(TodoModel).filter(TodoModel.todoId == id).delete(synchronize_session=False)
+    db.delete(select(TodoModel).where(TodoModel.todoId == id))
     db.commit()
+
     return {
         "success": True,
         "message": "Todo item deleted successfully",
@@ -54,10 +63,12 @@ async def delete_todo(
 
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def add_todo_item(
-    req: TodoSchema, db: Session = Depends(get_db), user=Depends(get_current_user)
+    req: TodoSchema,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[str, Depends(get_current_user)],
 ):
     new_todo = TodoModel(
-        todoId=cast(uuid4(), String),
+        todoId=str(uuid4()),
         userId=user,
         title=req.title,
         description=req.description,
@@ -66,7 +77,6 @@ async def add_todo_item(
 
     db.add(new_todo)
     db.commit()
-    db.refresh(new_todo)
 
     return {
         "status": 201,
@@ -80,10 +90,11 @@ async def add_todo_item(
 async def update_todo(
     id: str,
     request: UpdateTodoSchema,
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    user=Annotated[str, Depends(get_current_user)],
 ):
-    todo = db.query(TodoModel).filter(TodoModel.todoId == id).first()
+    # todo = db.query(TodoModel).filter(TodoModel.todoId == id).first()
+    todo = db.exec(select(TodoModel).where(TodoModel.todoId == id)).first()
 
     if request.title is not None:
         todo.title = request.title
@@ -92,6 +103,7 @@ async def update_todo(
     if request.isCompleted is not None:
         todo.isCompleted = request.isCompleted
 
+    db.add(todo)
     db.commit()
 
     return {

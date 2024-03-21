@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, status, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import cast, String
+from sqlmodel import Session, select
+
+from typing import Annotated
 from dependencies import get_db, get_current_user
 from .models import UserModel
 from .schema import RegisterUserSchema, LoginResponse
@@ -13,11 +14,13 @@ router = APIRouter(prefix="/api/users")
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-async def register_user(request: RegisterUserSchema, db: Session = Depends(get_db)):
+async def register_user(
+    request: RegisterUserSchema, db: Annotated[Session, Depends(get_db)]
+):
     hash = get_password_hash(request.password)
 
     new_user = UserModel(
-        id=cast(generate(), String),
+        id=str(generate()),
         username=request.username,
         email=request.email,
         password=hash,
@@ -25,7 +28,7 @@ async def register_user(request: RegisterUserSchema, db: Session = Depends(get_d
 
     db.add(new_user)
     db.commit()
-    db.refresh(new_user)
+    # db.refresh(new_user)
 
     return {
         "success": True,
@@ -35,9 +38,13 @@ async def register_user(request: RegisterUserSchema, db: Session = Depends(get_d
 
 @router.post("/login", status_code=status.HTTP_200_OK, response_model=LoginResponse)
 async def login_user(
-    request: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+    request: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: Annotated[Session, Depends(get_db)],
 ):
-    user = db.query(UserModel).filter(UserModel.username == request.username).first()
+    # user = db.query(UserModel).filter(UserModel.username == request.username).first()
+    user = db.exec(
+        select(UserModel).where(UserModel.username == request.username)
+    ).first()
 
     verify = verify_password(request.password, user.password)
 

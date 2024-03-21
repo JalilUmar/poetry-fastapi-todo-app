@@ -1,82 +1,134 @@
-import httpx
-from httpx import Client
+from fastapi.testclient import TestClient
+from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy.orm import sessionmaker
+from main import app
+from dependencies import get_db
+from todo.models import TodoModel
+from uuid import uuid4
+
+import pytest
+import os
+
+TEST_DB_URL = os.getenv("TEST_POSTGRES_DB_URL")
+
+engine = create_engine(TEST_DB_URL, pool_recycle=300)
 
 
-# TEST_COMMAND= "pytest -s -v ./api/test/test_todo.py"
-
-ENDPOINT = "http://localhost:8000"
-
-Bearer_token = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJtamItRlNYdnlmNlFFU3pFdlZ5ZFUiLCJleHAiOjE3MTA1NDMwMjZ9.bil7r1oNOcBVfxVy_Bbjt4P216x5_lO0G6zopymK1Ws"
+def override_get_db():
+    with Session(engine) as session:
+        yield session
 
 
-def test_create_todo_item():
-    response = httpx.post(
-        f"{ENDPOINT}/api/todo/create",
-        headers={"Authorization": Bearer_token},
-        json={"title": "test title user3", "description": "test description user3"},
+app.dependency_overrides[get_db] = override_get_db
+
+
+# Fixture to create a test client
+@pytest.fixture
+def client():
+    with TestClient(app) as c:
+        yield c
+
+
+# Fixture to set up and tear down the test database
+@pytest.fixture
+def test_db():
+    SQLModel.metadata.create_all(bind=engine)
+    yield
+    # SQLModel.metadata.drop_all(bind=engine)
+
+
+headers = {
+    "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzdUstcmNrbTBQcGNuMmVVUHJLbkQiLCJleHAiOjE3MTEwMTUzMzB9.-axRxjXMvF9zktfPliGLGoqCEjgSYsEJzWJsy0nsaeM"
+}
+
+
+# Create a new todo item
+def test_create_todo_item(client, test_db):
+    # Create a new todo item
+    response = client.post(
+        "/api/todo/create",
+        json={"title": "Test Todo", "description": "Test Description"},
+        headers=headers,
     )
-
-    json_response = response.json()
     assert response.status_code == 201
-    assert json_response["success"] == True
-    pass
+    data = response.json()
+    assert data["success"] == True
+    assert data["message"] == "Todo item added successfully"
+    assert data["response"]["title"] == "Test Todo"
 
 
-def test_update_todo_item():
-    response = httpx.post(
-        f"{ENDPOINT}/api/todo/create",
-        headers={"Authorization": Bearer_token},
-        json={"title": "test title2 user2", "description": "test description2 user2"},
-    )
-
-    json_response = response.json()
-    print("New todo item: \n", json_response["response"])
-
-    id = json_response["response"]["todoId"]
-    req_update = httpx.put(
-        f"{ENDPOINT}/api/todo/{id}",
-        json={"title": "test title2 user2 updated"},
-        headers={"Authorization": Bearer_token},
-    )
-    update_json_response = req_update.json()
-    print("Update todo item: \n", update_json_response)
-
-    assert req_update.status_code == 202
-    assert update_json_response["success"] == True
-    pass
-
-
-def test_get_todo_list():
-
-    with Client(follow_redirects=True) as client:
-        response = client.get(
-            f"{ENDPOINT}/api/todo", headers={"Authorization": Bearer_token}
-        )
-
-    json_response = response.json()
-    print("Get all todo response: \n", json_response)
+# get all todo items
+def test_get_all_todo(client, test_db):
+    # Assuming a todo item has been added from the create test
+    response = client.get("/api/todo/", headers=headers)
     assert response.status_code == 200
-    assert json_response["success"] == True
-    pass
+    data = response.json()
+    assert data["success"] == True
+    assert len(data["response"]) >= 1  # There should be at least one todo
 
 
-def test_delete_todo_item():
-    req_create_todo = httpx.post(
-        f"{ENDPOINT}/api/todo/create",
-        headers={"Authorization": Bearer_token},
-        json={"title": "test title3 user2", "description": "test description3 user2"},
+# get one todo item
+def test_get_one_todo(client, test_db):
+    new_todo = client.post(
+        "/api/todo/create",
+        json={
+            "title": "Test Todo for getting one",
+            "description": "Test Description for getting one todo at one time",
+        },
+        headers=headers,
     )
 
-    json_response = req_create_todo.json()
-    print("New todo item: \n", json_response["response"])
-    id = json_response["response"]["todoId"]
+    todo_id = new_todo.json()["response"]["todoId"]
 
-    req_delete_todo = httpx.delete(
-        f"{ENDPOINT}/api/todo/{id}", headers={"Authorization": Bearer_token}
+    # now getting this newly created todo item by its id. This should return the todo item with the given id.
+    response = client.get(f"/api/todo/{todo_id}", headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] == True
+    assert data["response"]["todoId"] == todo_id
+
+
+# update todo item
+def test_update_todo(client, test_db):
+    new_todo = client.post(
+        "/api/todo/create",
+        json={
+            "title": "Test Todo for update",
+            "description": "Test Description for update",
+        },
+        headers=headers,
     )
 
-    delete_json_response = req_delete_todo.json()
+    todo_id = new_todo.json()["response"]["todoId"]
 
-    assert req_delete_todo.status_code == 200
-    assert delete_json_response["success"] == True
-    pass
+    # now updating this newly created todo item with new title and isCompleted set to True
+    response = client.put(
+        f"/api/todo/{todo_id}",
+        json={"title": "Updated Title", "isCompleted": True},
+        headers=headers,
+    )
+    assert response.status_code == 202
+    data = response.json()
+    assert data["success"] == True
+    assert data["message"] == "Todo item updated successfully"
+    assert data["response"]["title"] == "Updated Title"
+
+
+def test_delete_todo(client, test_db):
+    # Assuming a todo item has been added and its id is 'todo_id'
+    new_todo = client.post(
+        "/api/todo/create",
+        json={
+            "title": "Test Todo for delete",
+            "description": "Test Description for delete",
+        },
+        headers=headers,
+    )
+    todo_id = new_todo.json()["response"]["todoId"]
+
+    # now deleting this newly created todo item
+    response = client.delete(f"/api/todo/{todo_id}", headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] == True
+    assert data["message"] == "Todo item deleted successfully"

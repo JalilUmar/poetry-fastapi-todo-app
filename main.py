@@ -19,8 +19,8 @@ app.add_middleware(
 )
 
 # binded Models
-user_models.Base.metadata.create_all(bind=engine)
-todo_models.Base.metadata.create_all(bind=engine)
+# user_models.Base.metadata.create_all(bind=engine)
+# todo_models.Base.metadata.create_all(bind=engine)
 
 
 @app.get("/api/health", status_code=status.HTTP_200_OK)
