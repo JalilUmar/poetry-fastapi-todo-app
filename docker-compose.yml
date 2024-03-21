@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  app:
+    container_name: todo_app
+    build: 
+      context: .
+    ports:
+      - 8000:8000
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    command: --reload
